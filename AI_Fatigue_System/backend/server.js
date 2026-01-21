@@ -5,6 +5,7 @@ const cors = require('cors');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { Resend } = require('resend');
+const axios = require('axios'); 
 require('dotenv').config();
 
 const app = express();
@@ -45,7 +46,7 @@ const AIReport = mongoose.model('AIReport', ReportSchema);
 // --- 3. SERVICES ---
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --- 4. AUTH ROUTES (MySQL + Resend) ---
+// --- 4. AUTH ROUTES ---
 
 app.post('/api/signup', async (req, res) => {
     const { username, email, password } = req.body;
@@ -76,42 +77,8 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-app.post('/api/forgot-password', async (req, res) => {
-    const { email } = req.body;
-    const query = "SELECT * FROM users WHERE email = ?";
-    db.query(query, [email], async (err, results) => {
-        if (err || results.length === 0) return res.status(404).json({ error: "User not found" });
-        try {
-            await resend.emails.send({
-                from: 'FatigueGuard <onboarding@resend.dev>',
-                to: email,
-                subject: 'Password Reset Request',
-                html: `<h3>Reset Password</h3><p>Click <a href="http://localhost:5173/reset-password?email=${email}">here</a> to reset.</p>`
-            });
-            res.json({ message: "Reset link sent!" });
-        } catch (mailErr) {
-            res.status(500).json({ error: "Email delivery failed" });
-        }
-    });
-});
+// --- 5. REPORT ROUTES ---
 
-app.post('/api/reset-password', async (req, res) => {
-    const { email, newPassword } = req.body;
-    try {
-        const hashedPassword = await bcrypt.hash(newPassword, 10);
-        const query = "UPDATE users SET password_hash = ? WHERE email = ?";
-        db.query(query, [hashedPassword, email], (err) => {
-            if (err) return res.status(500).json({ error: "Database error" });
-            res.json({ message: "Password updated successfully!" });
-        });
-    } catch (err) {
-        res.status(500).json({ error: "Internal server error" });
-    }
-});
-
-// --- 5. REPORT ROUTES (MongoDB) ---
-
-// FETCH Reports (For Website Dashboard)
 app.get('/api/reports/:userId', async (req, res) => {
     try {
         const reports = await AIReport.find({ userId: req.params.userId }).sort({ createdAt: -1 });
@@ -121,14 +88,52 @@ app.get('/api/reports/:userId', async (req, res) => {
     }
 });
 
-// INSERT Report (For App/Testing)
-app.post('/api/reports', async (req, res) => {
+// --- 6. AI INTEGRATION PROXY (LOGS EVERYTHING) ---
+
+app.post('/api/predict-fatigue', async (req, res) => {
     try {
-        const newReport = new AIReport(req.body);
-        await newReport.save();
-        res.status(201).json({ message: "Report saved successfully" });
+        const { ear, mar, userId } = req.body;
+
+        // 1. Forward data to Python AI Bridge
+        const aiResponse = await axios.post('http://127.0.0.1:5001/predict', { 
+            ear: ear, 
+            mar: mar, 
+            typing_gap: 400, 
+            typing_std: 50 
+        });
+
+        const result = aiResponse.data;
+
+        // 2. Logic to determine severity and save to MongoDB
+        if (userId) {
+            let level = "Low";
+            let recommendation = "You are alert and focused. Keep it up!";
+
+            if (result.score >= 0.75) {
+                level = "High";
+                recommendation = "CRITICAL: Please take a 15-minute break immediately.";
+            } else if (result.score >= 0.40) {
+                level = "Medium";
+                recommendation = "Warning: Signs of fatigue detected. Consider a short rest.";
+            }
+
+            // Persistence Logic: Saving EVERY check (Low, Medium, and High)
+            const report = new AIReport({
+                userId: userId,
+                fatigueLevel: level,
+                fatigueScore: (result.score * 100).toFixed(0), // Percentage for dashboard/MongoDB
+                recommendation: recommendation
+            });
+            
+            await report.save();
+            console.log(`✅ [MongoDB] Logged ${level} state (${(result.score * 100).toFixed(0)}%) for User: ${userId}`);
+        }
+
+        res.json(result);
+
     } catch (err) {
-        res.status(500).json({ error: "Failed to save report" });
+        console.error("AI Bridge Error:", err.message);
+        res.status(500).json({ error: "AI Engine is offline" });
     }
 });
 

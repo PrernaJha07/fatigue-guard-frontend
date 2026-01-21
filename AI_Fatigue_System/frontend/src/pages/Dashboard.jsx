@@ -1,127 +1,263 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import axios from 'axios';
-import { Brain, MousePointer2, Type, TrendingUp, AlertCircle } from 'lucide-react';
+import { Brain, MousePointer2, Type, TrendingUp, AlertCircle, Camera, Clock, ShieldCheck } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { FaceMesh } from '@mediapipe/face_mesh';
+import * as cam from '@mediapipe/camera_utils';
+import { sendDataToAI } from '../utils/aiService';
 
-const Dashboard = () => {
-    const [chartData, setChartData] = useState([]);
-    const [latestStats, setLatestStats] = useState({ fatigueLevel: 'Loading...', fatigueScore: 0 });
-    const userId = localStorage.getItem('userId') || 1; 
+// --- SUB-COMPONENT: WEBCAM MONITOR ---
+const WebcamMonitor = ({ onDetection }) => {
+    const videoRef = useRef(null);
+    const calculateEAR = (landmarks) => {
+        const p2_p6 = Math.hypot(landmarks[160].x - landmarks[144].x, landmarks[160].y - landmarks[144].y);
+        const p3_p5 = Math.hypot(landmarks[158].x - landmarks[153].x, landmarks[158].y - landmarks[153].y);
+        const p1_p4 = Math.hypot(landmarks[33].x - landmarks[133].x, landmarks[33].y - landmarks[133].y);
+        return (p2_p6 + p3_p5) / (2.0 * p1_p4);
+    };
 
     useEffect(() => {
-        const fetchRealTimeData = async () => {
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+        });
+        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        faceMesh.onResults((results) => {
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                const ear = calculateEAR(landmarks);
+                const mar = Math.hypot(landmarks[13].x - landmarks[14].x, landmarks[13].y - landmarks[14].y) * 10;
+                onDetection(ear, mar);
+            }
+        });
+        if (videoRef.current) {
+            const camera = new cam.Camera(videoRef.current, {
+                onFrame: async () => { await faceMesh.send({ image: videoRef.current }); },
+                width: 640, height: 480
+            });
+            camera.start();
+        }
+    }, [onDetection]);
+
+    return (
+        <div className="fixed bottom-6 right-6 w-48 h-36 rounded-2xl overflow-hidden border-4 border-white shadow-2xl z-50 bg-slate-900 ring-1 ring-slate-200">
+            <video ref={videoRef} className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-blue-600/90 backdrop-blur-md text-[9px] text-white px-2 py-1 rounded-full font-bold">
+                <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div> SENSOR LIVE
+            </div>
+        </div>
+    );
+};
+
+// --- SUB-COMPONENT: HISTORY TABLE ---
+const HistoryTable = ({ reports }) => (
+    <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden mt-8">
+        <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+            <div className="flex items-center gap-2">
+                <Clock className="text-slate-400" size={20} />
+                <h3 className="text-lg font-bold text-slate-800">Fatigue Incident History</h3>
+            </div>
+            <span className="text-xs font-bold text-slate-500 bg-slate-200 px-3 py-1 rounded-full">
+                {reports.length} Logs Stored
+            </span>
+        </div>
+        <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+                <thead className="bg-slate-50/80 text-slate-500 text-[11px] uppercase tracking-widest font-bold">
+                    <tr>
+                        <th className="px-8 py-4">Timestamp</th>
+                        <th className="px-8 py-4">AI Assessment</th>
+                        <th className="px-8 py-4">Fatigue Score</th>
+                        <th className="px-8 py-4">System Recommendation</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                    {reports.length > 0 ? reports.map((report, idx) => (
+                        <tr key={idx} className="hover:bg-blue-50/30 transition-colors group">
+                            <td className="px-8 py-5 text-sm text-slate-600 font-medium">
+                                {report.fullDate}
+                            </td>
+                            <td className="px-8 py-5">
+                                <span className={`flex items-center gap-1.5 w-fit px-3 py-1 rounded-full text-[10px] font-black tracking-tight ${
+                                    report.scoreValue > 70 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'
+                                }`}>
+                                    <ShieldCheck size={12}/>
+                                    {report.scoreValue > 70 ? 'CRITICAL ALERT' : (report.scoreValue > 40 ? 'MONITORING' : 'OPTIMAL')}
+                                </span>
+                            </td>
+                            <td className="px-8 py-5">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-12 bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                        <div className="bg-blue-500 h-full" style={{ width: `${report.scoreValue}%` }}></div>
+                                    </div>
+                                    <span className="text-sm font-bold text-slate-700">{report.scoreValue}%</span>
+                                </div>
+                            </td>
+                            <td className="px-8 py-5 text-sm text-slate-500 italic">
+                                {report.recommendation || "System monitoring active."}
+                            </td>
+                        </tr>
+                    )) : (
+                        <tr>
+                            <td colSpan="4" className="px-8 py-10 text-center text-slate-400 text-sm">No historical fatigue data found in MongoDB.</td>
+                        </tr>
+                    )}
+                </tbody>
+            </table>
+        </div>
+    </div>
+);
+
+// --- MAIN DASHBOARD COMPONENT ---
+const Dashboard = () => {
+    const [chartData, setChartData] = useState([]);
+    const [liveAI, setLiveAI] = useState({ status: "Standby", score: 0 });
+    const userId = localStorage.getItem('userId') || 1;
+    
+    // Throttling Reference: Prevents database flooding (5 second limit)
+    const lastSaveTime = useRef(0);
+
+    useEffect(() => {
+        const fetchHistory = async () => {
             try {
                 const res = await axios.get(`http://localhost:5000/api/reports/${userId}`);
-                
-                // Format data for the Recharts AreaChart
                 const formatted = res.data.map(item => ({
                     time: new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                    level: item.fatigueScore
-                })).reverse(); // Reverse so latest is on the right
-                
+                    fullDate: new Date(item.createdAt).toLocaleString(),
+                    level: item.fatigueScore / 100, // For the chart (0-1 range)
+                    scoreValue: item.fatigueScore, // For the table (0-100 range)
+                    recommendation: item.recommendation
+                })).reverse();
                 setChartData(formatted);
-                
-                // Set the most recent single report for the StatCards
-                if (res.data.length > 0) {
-                    setLatestStats(res.data[0]);
-                }
             } catch (err) {
                 console.error("Error fetching MongoDB data:", err);
             }
         };
-
-        fetchRealTimeData();
-        // Optional: Set up polling to refresh every 30 seconds
-        const interval = setInterval(fetchRealTimeData, 30000);
+        fetchHistory();
+        const interval = setInterval(fetchHistory, 15000); 
         return () => clearInterval(interval);
     }, [userId]);
 
+    const handleLiveDetection = async (ear, mar) => {
+        const currentTime = Date.now();
+
+        // Throttling Check: Only call backend once every 5000ms (5 seconds)
+        if (currentTime - lastSaveTime.current > 5000) {
+            lastSaveTime.current = currentTime; 
+
+            const result = await sendDataToAI(ear, mar);
+            if (result) {
+                setLiveAI({ status: result.status, score: result.score });
+            }
+        }
+    };
+
     return (
-        <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <header className="flex justify-between items-center">
+        <div className={`p-8 space-y-8 min-h-screen transition-all duration-700 ${liveAI.status === "FATIGUE DETECTED" ? 'bg-red-50' : 'bg-slate-50'}`}>
+            <WebcamMonitor onDetection={handleLiveDetection} />
+
+            <header className="flex justify-between items-end">
                 <div>
-                    <h1 className="text-3xl font-extrabold text-slate-900">Workspace Analytics</h1>
-                    <p className="text-slate-500">Real-time monitoring of cognitive fatigue levels.</p>
+                    <h1 className="text-4xl font-black text-slate-900 tracking-tight italic">AI.FATIGUE_GUARD</h1>
+                    <p className="text-slate-500 font-medium">Cognitive Load & Neural Fatigue Analysis Dashboard</p>
                 </div>
-                <div className="flex items-center gap-2 px-3 py-1 bg-green-50 text-green-600 rounded-full text-xs font-bold ring-1 ring-green-100">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    LOCAL AI ACTIVE
+                <div className="flex items-center gap-3 bg-white p-2 rounded-2xl shadow-sm border border-slate-200">
+                    <div className="px-4 py-2 bg-emerald-50 text-emerald-600 rounded-xl text-[10px] font-black ring-1 ring-emerald-100 flex items-center gap-2">
+                        <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div> ENGINE_ONLINE
+                    </div>
                 </div>
             </header>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <StatCard 
-                    title="Cognitive Load" 
-                    value={latestStats.fatigueLevel} 
-                    icon={<Brain className="text-blue-500"/>} 
-                    progress={latestStats.fatigueScore} 
-                />
-                <StatCard title="Typing Rhythm" value="82" unit="WPM" subtext="Stable Consistency" icon={<Type className="text-indigo-500"/>} />
-                <StatCard title="Mouse Precision" value="94%" subtext="Standard Deviation: 0.04" icon={<MousePointer2 className="text-purple-500"/>} />
+            {/* LIVE FEEDBACK SECTION */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="lg:col-span-2 bg-white p-8 rounded-3xl border-2 border-blue-100 shadow-xl relative overflow-hidden group">
+                    <div className="relative z-10 flex flex-col justify-between h-full">
+                        <div>
+                            <div className="flex items-center gap-2 text-blue-600 mb-4">
+                                <Brain size={24} />
+                                <span className="text-xs font-black uppercase tracking-[0.2em]">Neural Stream Inference</span>
+                            </div>
+                            <h2 className={`text-5xl font-black mb-2 transition-colors duration-500 ${liveAI.status === "FATIGUE DETECTED" ? 'text-red-600' : 'text-slate-900'}`}>
+                                {liveAI.status}
+                            </h2>
+                            <p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Confidence Index: {(liveAI.score * 100).toFixed(2)}%</p>
+                        </div>
+                        
+                        <div className="mt-8">
+                            <div className="flex justify-between text-[10px] font-black text-slate-400 mb-3 tracking-tighter uppercase">
+                                <span>Optimal State</span>
+                                <span>High Risk Zone</span>
+                            </div>
+                            <div className="w-full h-4 bg-slate-100 rounded-full p-1">
+                                <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${liveAI.score > 0.7 ? 'bg-red-500' : 'bg-blue-500 shadow-[0_0_15px_rgba(59,130,246,0.5)]'}`}
+                                    style={{ width: `${liveAI.score * 100}%` }}
+                                ></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div className={`absolute right-[-40px] top-[-40px] w-64 h-64 rounded-full blur-[100px] transition-colors duration-500 ${liveAI.status === "FATIGUE DETECTED" ? 'bg-red-200/40' : 'bg-blue-200/30'}`}></div>
+                </div>
+
+                <div className="space-y-4">
+                    <StatCard title="Focus Score" value="92" unit="%" icon={<ShieldCheck className="text-emerald-500"/>} progress={92} />
+                    <StatCard title="Blink Frequency" value={(liveAI.score * 10).toFixed(1)} unit="Hz" icon={<TrendingUp className="text-indigo-500"/>} />
+                </div>
             </div>
 
-            {/* Chart Section */}
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
-                <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
-                    <TrendingUp className="text-blue-600" size={20} /> Fatigue Trend Progression
-                </h3>
-                <div className="h-64">
+            {/* ANALYTICS CHART */}
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+                <div className="flex items-center justify-between mb-8">
+                    <h3 className="text-xl font-black text-slate-800 flex items-center gap-3 italic">
+                        <TrendingUp className="text-blue-600" /> DATA_STREAM_TREND
+                    </h3>
+                </div>
+                <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={chartData}>
                             <defs>
                                 <linearGradient id="colorLevel" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
                                     <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
                                 </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                            <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} dy={10} />
-                            <YAxis hide domain={[0, 100]} />
-                            <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
-                            <Area type="monotone" dataKey="level" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorLevel)" />
+                            <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 10, fontWeight: 'bold'}} dy={15} />
+                            <YAxis hide domain={[0, 1]} />
+                            <Tooltip contentStyle={{ borderRadius: '20px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }} />
+                            <Area type="monotone" dataKey="level" stroke="#3b82f6" strokeWidth={4} fillOpacity={1} fill="url(#colorLevel)" />
                         </AreaChart>
                     </ResponsiveContainer>
                 </div>
             </div>
 
-            {/* Alert Banner - Dynamic based on Score */}
-            {latestStats.fatigueScore > 70 && (
-                <div className="bg-red-50 border border-red-100 p-6 rounded-2xl flex gap-4">
-                    <div className="bg-red-500 p-2 rounded-xl text-white h-fit">
-                        <AlertCircle size={24} />
-                    </div>
-                    <div>
-                        <h4 className="font-bold text-red-900 text-lg">High Fatigue Alert</h4>
-                        <p className="text-red-700 mt-1">
-                            Our AI detected {latestStats.fatigueScore}% fatigue. <b>Recommendation:</b> {latestStats.recommendation || 'Take a break immediately.'}
-                        </p>
-                    </div>
+            {/* HISTORY LOGS TABLE */}
+            <HistoryTable reports={chartData} />
+
+            {/* ALERT BANNER */}
+            {liveAI.score > 0.7 && (
+                <div className="fixed top-8 left-1/2 -translate-x-1/2 bg-red-600 text-white px-8 py-4 rounded-full shadow-[0_0_50px_rgba(220,38,38,0.5)] flex items-center gap-4 animate-bounce z-[100] border-4 border-red-400">
+                    <AlertCircle size={24} />
+                    <span className="font-black italic tracking-tighter text-lg uppercase">Critical Fatigue Detected - Take Action!</span>
                 </div>
             )}
         </div>
     );
 };
 
-const StatCard = ({ title, value, unit, subtext, icon, progress }) => (
-    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex justify-between items-start mb-4">
-            <span className="text-slate-500 font-medium">{title}</span>
+const StatCard = ({ title, value, unit, icon, progress }) => (
+    <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm h-full">
+        <div className="flex justify-between items-center mb-4">
+            <span className="text-slate-400 text-xs font-black uppercase tracking-widest">{title}</span>
             {icon}
         </div>
         <div className="flex items-baseline gap-1">
-            <span className="text-3xl font-bold text-slate-900">{value}</span>
-            {unit && <span className="text-slate-400 font-normal text-sm">{unit}</span>}
+            <span className="text-4xl font-black text-slate-900 tracking-tighter">{value}</span>
+            <span className="text-slate-400 font-bold text-sm uppercase">{unit}</span>
         </div>
-        {progress !== undefined ? (
-            <div className="mt-4 h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-                <div 
-                    className={`h-full transition-all duration-1000 ${progress > 70 ? 'bg-red-500' : 'bg-blue-500'}`} 
-                    style={{ width: `${progress}%` }}
-                ></div>
+        {progress && (
+            <div className="mt-4 h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${progress}%` }}></div>
             </div>
-        ) : (
-            <p className="text-green-500 text-xs font-bold mt-2 uppercase tracking-wider">{subtext}</p>
         )}
     </div>
 );

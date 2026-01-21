@@ -29,3 +29,13 @@ dist/
 .DS_Store
 .env
 build
+
+# Python
+venv/
+venv_ai/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Models (optional - if they are too big for GitHub)
+*.pkl
