@@ -32,11 +32,14 @@ mongoose.connect('mongodb://127.0.0.1:27017/fatigue_db')
     .then(() => console.log('🍃 Connected to MongoDB (Ready for AI Reports)'))
     .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
-// --- 2. MONGODB SCHEMA ---
+// --- 2. MONGODB SCHEMA (UPDATED TO STORE RAW DATA) ---
 const ReportSchema = new mongoose.Schema({
     userId: { type: Number, required: true },
     fatigueLevel: String,   
     fatigueScore: Number,   
+    // Added these fields to store your real-time sensor data automatically
+    mousePrecision: Number,
+    typingGap: Number,
     recommendation: String, 
     createdAt: { type: Date, default: Date.now }
 });
@@ -88,18 +91,19 @@ app.get('/api/reports/:userId', async (req, res) => {
     }
 });
 
-// --- 6. AI INTEGRATION PROXY (LOGS EVERYTHING) ---
+// --- 6. AI INTEGRATION PROXY (UPDATED FOR AUTOMATIC LOGGING) ---
 
 app.post('/api/predict-fatigue', async (req, res) => {
     try {
-        const { ear, mar, userId } = req.body;
+        // Updated to receive mouse_precision from frontend
+        const { ear, mar, userId, typing_gap, typing_std, mouse_precision } = req.body;
 
         // 1. Forward data to Python AI Bridge
         const aiResponse = await axios.post('http://127.0.0.1:5001/predict', { 
             ear: ear, 
             mar: mar, 
-            typing_gap: 400, 
-            typing_std: 50 
+            typing_gap: typing_gap || 400, 
+            typing_std: typing_std || 50 
         });
 
         const result = aiResponse.data;
@@ -117,16 +121,18 @@ app.post('/api/predict-fatigue', async (req, res) => {
                 recommendation = "Warning: Signs of fatigue detected. Consider a short rest.";
             }
 
-            // Persistence Logic: Saving EVERY check (Low, Medium, and High)
+            // Persistence Logic: Saving the real detected values into MongoDB
             const report = new AIReport({
                 userId: userId,
                 fatigueLevel: level,
-                fatigueScore: (result.score * 100).toFixed(0), // Percentage for dashboard/MongoDB
+                fatigueScore: (result.score * 100).toFixed(0),
+                mousePrecision: mouse_precision || 100, // AUTO-LOGGING MOUSE
+                typingGap: typing_gap || 400,           // AUTO-LOGGING TYPING
                 recommendation: recommendation
             });
             
             await report.save();
-            console.log(`✅ [MongoDB] Logged ${level} state (${(result.score * 100).toFixed(0)}%) for User: ${userId}`);
+            console.log(`✅ [MongoDB] Auto-Logged for User ${userId}: Mouse ${mouse_precision}% | Typing ${typing_gap}ms`);
         }
 
         res.json(result);

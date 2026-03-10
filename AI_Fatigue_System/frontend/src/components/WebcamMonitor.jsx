@@ -4,6 +4,8 @@ import * as cam from '@mediapipe/camera_utils';
 
 const WebcamMonitor = ({ onDetection }) => {
     const videoRef = useRef(null);
+    const faceMeshRef = useRef(null);
+    const cameraRef = useRef(null);
 
     // EAR Calculation Logic (Browser Side)
     const calculateEAR = (landmarks) => {
@@ -14,17 +16,23 @@ const WebcamMonitor = ({ onDetection }) => {
     };
 
     useEffect(() => {
-        const faceMesh = new FaceMesh({
+        // Initialize FaceMesh and store in Ref to prevent re-creation
+        faceMeshRef.current = new FaceMesh({
             locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
         });
 
-        faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, minDetectionConfidence: 0.5 });
+        faceMeshRef.current.setOptions({ 
+            maxNumFaces: 1, 
+            refineLandmarks: true, 
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5 
+        });
 
-        faceMesh.onResults((results) => {
+        faceMeshRef.current.onResults((results) => {
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
                 const landmarks = results.multiFaceLandmarks[0];
                 const ear = calculateEAR(landmarks);
-                // Placeholder for MAR - simplified for demo
+                // MAR calculation
                 const mar = Math.hypot(landmarks[13].x - landmarks[14].x, landmarks[13].y - landmarks[14].y) * 10;
                 
                 // SEND DATA TO DASHBOARD -> BACKEND
@@ -33,17 +41,40 @@ const WebcamMonitor = ({ onDetection }) => {
         });
 
         if (videoRef.current) {
-            const camera = new cam.Camera(videoRef.current, {
-                onFrame: async () => { await faceMesh.send({ image: videoRef.current }); },
-                width: 640, height: 480
+            cameraRef.current = new cam.Camera(videoRef.current, {
+                onFrame: async () => { 
+                    if (faceMeshRef.current) {
+                        await faceMeshRef.current.send({ image: videoRef.current }); 
+                    }
+                },
+                width: 640, 
+                height: 480
             });
-            camera.start();
+            cameraRef.current.start();
         }
+
+        // --- CRITICAL FIX: CLEANUP FUNCTION ---
+        // This stops the camera and closes the WebGL context when the component unmounts
+        return () => {
+            if (cameraRef.current) {
+                cameraRef.current.stop();
+            }
+            if (faceMeshRef.current) {
+                faceMeshRef.current.close();
+            }
+        };
     }, [onDetection]);
 
     return (
-        <div className="hidden"> {/* Keep hidden if you just want it to work in the background */}
-            <video ref={videoRef} />
+        <div className="fixed bottom-6 right-6 w-48 h-36 rounded-2xl overflow-hidden border-4 border-white shadow-2xl z-50 bg-slate-900 ring-1 ring-slate-200">
+            <video 
+                ref={videoRef} 
+                className="w-full h-full object-cover" 
+                style={{ transform: 'scaleX(-1)' }} 
+            />
+            <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-blue-600/90 backdrop-blur-md text-[9px] text-white px-2 py-1 rounded-full font-bold">
+                <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div> SENSOR LIVE
+            </div>
         </div>
     );
 };
