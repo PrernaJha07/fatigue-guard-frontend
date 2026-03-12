@@ -12,23 +12,22 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  // --- DYNAMIC API URL ---
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
 
     try {
-      // 1. Send login request to Backend
-      const response = await axios.post('http://localhost:5000/api/login', {
+      // UPDATED: Using dynamic API_BASE_URL instead of localhost
+      const response = await axios.post(`${API_BASE_URL}/api/login`, {
         email,
         password
       });
 
-      // 2. Destructure data from MySQL response
       const { token, user } = response.data;
-
-      // 3. Trigger upgraded AuthContext login with user object
       login(user, token); 
-      
       navigate('/dashboard');
 
     } catch (err) {
