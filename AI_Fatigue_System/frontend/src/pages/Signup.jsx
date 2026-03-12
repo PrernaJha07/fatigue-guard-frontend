@@ -12,12 +12,15 @@ export default function Signup() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // The logic to connect to your Node.js + MySQL backend
+  // --- DYNAMIC API URL ---
+  const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
   const handleSignup = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await axios.post('http://localhost:5000/api/signup', {
+      // UPDATED: Using dynamic API_BASE_URL instead of localhost
+      await axios.post(`${API_BASE_URL}/api/signup`, {
         username: fullName,
         email: email,
         password: password
@@ -25,7 +28,6 @@ export default function Signup() {
       alert("Account created successfully!");
       navigate('/login');
     } catch (err) {
-      // Handles errors from the server (e.g., email already exists)
       alert("Registration failed: " + (err.response?.data?.error || "Server Error"));
     } finally {
       setLoading(false);
@@ -46,7 +48,6 @@ export default function Signup() {
         </div>
 
         <form onSubmit={handleSignup} className="space-y-4">
-          {/* Full Name Input */}
           <div className="relative">
             <User className="absolute left-3 top-3 text-slate-400" size={20} />
             <input 
@@ -59,7 +60,6 @@ export default function Signup() {
             />
           </div>
 
-          {/* Email Input */}
           <div className="relative">
             <Mail className="absolute left-3 top-3 text-slate-400" size={20} />
             <input 
@@ -72,7 +72,6 @@ export default function Signup() {
             />
           </div>
 
-          {/* Password Input */}
           <div className="relative">
             <Lock className="absolute left-3 top-3 text-slate-400" size={20} />
             <input 
