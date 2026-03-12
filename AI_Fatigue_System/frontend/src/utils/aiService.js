@@ -1,24 +1,27 @@
-// AI_Fatigue_System/frontend/src/utils/aiService.js
-
 /**
  * Sends real-time sensor data to the Node.js backend for fatigue prediction.
+ * Supports both local development and cloud deployment.
  */
 export const sendDataToAI = async (earValue, marValue, typingGap = 400, typingStd = 50, mousePrecision = 100) => {
     
-    // --- 1. DYNAMIC API URL ---
-    // If VITE_API_URL is set on Render/Vercel, it uses that. 
-    // Otherwise, it falls back to localhost for your laptop testing.
+    // 1. Dynamic API URL
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
+    // 2. Retrieve User & Token from Storage
     const userStored = localStorage.getItem('user');
+    const token = localStorage.getItem('token');
+    
     const userData = userStored ? JSON.parse(userStored) : null;
     const userId = userData ? userData.id : 1; 
 
     try {
-        // CHANGED: Using ${API_BASE_URL} instead of hardcoded localhost
         const response = await fetch(`${API_BASE_URL}/api/predict-fatigue`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                // Added Authorization header for cloud security
+                'Authorization': token ? `Bearer ${token}` : '' 
+            },
             body: JSON.stringify({
                 ear: earValue,
                 mar: marValue,
@@ -29,13 +32,17 @@ export const sendDataToAI = async (earValue, marValue, typingGap = 400, typingSt
             })
         });
 
-        if (!response.ok) throw new Error('AI Server response not OK');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'AI Server response not OK');
+        }
         
         const result = await response.json();
         return result; 
 
     } catch (error) {
-        console.error("Connection to AI Server failed:", error);
+        // Detailed logging helps find issues faster on Render
+        console.error("AI Service Error:", error.message);
         return null;
     }
 };
