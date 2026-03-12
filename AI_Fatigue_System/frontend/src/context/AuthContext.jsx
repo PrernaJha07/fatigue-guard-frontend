@@ -3,35 +3,59 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-    // Initialize state from localStorage to prevent logout on page refresh
+    // 1. Initialize State with Safety Checks
     const [user, setUser] = useState(() => {
-        const savedUser = localStorage.getItem('user');
-        return savedUser ? JSON.parse(savedUser) : null;
+        try {
+            const savedUser = localStorage.getItem('user');
+            return savedUser ? JSON.parse(savedUser) : null;
+        } catch (error) {
+            console.error("AuthContext: Error parsing saved user", error);
+            return null;
+        }
     });
     
     const [token, setToken] = useState(localStorage.getItem('token') || null);
 
+    // 2. Computed Auth State
     const isAuthenticated = !!token;
 
-    // Login function now accepts the user object and token from MySQL
+    // 3. Persist Changes to LocalStorage automatically
+    useEffect(() => {
+        if (token) {
+            localStorage.setItem('token', token);
+        } else {
+            localStorage.removeItem('token');
+        }
+    }, [token]);
+
+    useEffect(() => {
+        if (user) {
+            localStorage.setItem('user', JSON.stringify(user));
+        } else {
+            localStorage.removeItem('user');
+        }
+    }, [user]);
+
+    // 4. Login Action
     const login = (userData, userToken) => {
         setUser(userData);
         setToken(userToken);
-        localStorage.setItem('token', userToken);
-        localStorage.setItem('user', JSON.stringify(userData));
     };
 
-    // Logout clears everything
+    // 5. Logout Action
     const logout = () => {
         setUser(null);
         setToken(null);
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login'; // Redirect to login
+        // Using clear() is safer to ensure no ghost data remains
+        localStorage.clear();
+        // We use a small delay for smoother UI transitions
+        setTimeout(() => {
+            window.location.href = '/login';
+        }, 100);
     };
 
     return (
-        <AuthContext.Provider value={{ isAuthenticated, user, login, logout }}>
+        <AuthContext.Provider value={{ isAuthenticated, user, token, login, logout }}>
             {children}
         </AuthContext.Provider>
     );
