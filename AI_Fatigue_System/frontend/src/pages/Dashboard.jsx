@@ -1,69 +1,10 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import axios from 'axios';
-import { Brain, MousePointer2, Type, TrendingUp, AlertCircle, Clock, ShieldCheck } from 'lucide-react';
+import { Brain, MousePointer2, Type, Clock, ShieldCheck } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { FaceMesh } from '@mediapipe/face_mesh';
-import * as cam from '@mediapipe/camera_utils';
+import { useAuth } from '../context/AuthContext';
+import WebcamMonitor from '../components/WebcamMonitor'; // Using your optimized component
 import { sendDataToAI } from '../utils/aiService';
-
-// --- SUB-COMPONENT: WEBCAM MONITOR (STABILIZED) ---
-const WebcamMonitor = ({ onDetection }) => {
-    const videoRef = useRef(null);
-    const cameraRef = useRef(null);
-    
-    // Memoize FaceMesh to ensure the WASM module only loads ONCE per session
-    const faceMesh = useMemo(() => {
-        const fm = new FaceMesh({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
-        });
-        fm.setOptions({ 
-            maxNumFaces: 1, 
-            refineLandmarks: true, 
-            minDetectionConfidence: 0.5, 
-            minTrackingConfidence: 0.5 
-        });
-        return fm;
-    }, []);
-
-    const calculateEAR = (landmarks) => {
-        const p2_p6 = Math.hypot(landmarks[160].x - landmarks[144].x, landmarks[160].y - landmarks[144].y);
-        const p3_p5 = Math.hypot(landmarks[158].x - landmarks[153].x, landmarks[158].y - landmarks[153].y);
-        const p1_p4 = Math.hypot(landmarks[33].x - landmarks[133].x, landmarks[33].y - landmarks[133].y);
-        return (p2_p6 + p3_p5) / (2.0 * p1_p4);
-    };
-
-    useEffect(() => {
-        faceMesh.onResults((results) => {
-            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-                const landmarks = results.multiFaceLandmarks[0];
-                const ear = calculateEAR(landmarks);
-                const mar = Math.hypot(landmarks[13].x - landmarks[14].x, landmarks[13].y - landmarks[14].y) * 10;
-                onDetection(ear, mar);
-            }
-        });
-
-        if (videoRef.current) {
-            cameraRef.current = new cam.Camera(videoRef.current, {
-                onFrame: async () => { await faceMesh.send({ image: videoRef.current }); },
-                width: 640, height: 480
-            });
-            cameraRef.current.start();
-        }
-
-        return () => {
-            if (cameraRef.current) cameraRef.current.stop();
-        };
-    }, [onDetection, faceMesh]);
-
-    return (
-        <div className="fixed bottom-6 right-6 w-48 h-36 rounded-2xl overflow-hidden border-4 border-white shadow-2xl z-50 bg-slate-900 ring-1 ring-slate-200">
-            <video ref={videoRef} className="w-full h-full object-cover" style={{ transform: 'scaleX(-1)' }} />
-            <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-blue-600/90 backdrop-blur-md text-[9px] text-white px-2 py-1 rounded-full font-bold">
-                <div className="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></div> SENSOR LIVE
-            </div>
-        </div>
-    );
-};
 
 // --- SUB-COMPONENT: HISTORY TABLE ---
 const HistoryTable = ({ reports }) => (
@@ -123,6 +64,7 @@ const HistoryTable = ({ reports }) => (
 
 // --- MAIN DASHBOARD COMPONENT ---
 const Dashboard = () => {
+    const { user, token } = useAuth(); // Get token for secure cloud requests
     const [chartData, setChartData] = useState([]);
     const [liveAI, setLiveAI] = useState({ status: "Standby", score: 0 });
     const [typingStats, setTypingStats] = useState({ gap: 400, std: 50 });
@@ -133,17 +75,15 @@ const Dashboard = () => {
     const mousePoints = useRef([]);
     const lastSaveTime = useRef(0);
 
-    // --- DYNAMIC API URL ---
     const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    const userId = user?.id || 1; 
 
-    const userStored = localStorage.getItem('user');
-    const userData = userStored ? JSON.parse(userStored) : null;
-    const userId = userData ? userData.id : 1; 
-
+    // Fetch History with Bearer Token for Live Security
     const fetchHistory = useCallback(async () => {
         try {
-            // UPDATED: Replaced localhost with dynamic cloud URL
-            const res = await axios.get(`${API_BASE_URL}/api/reports/${userId}`);
+            const res = await axios.get(`${API_BASE_URL}/api/reports/${userId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             const formatted = res.data.map(item => ({
                 time: new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 fullDate: new Date(item.createdAt).toLocaleString(),
@@ -153,16 +93,17 @@ const Dashboard = () => {
             }));
             setChartData(formatted);
         } catch (err) {
-            console.error("Error fetching data:", err);
+            console.error("Dashboard: Error fetching history", err);
         }
-    }, [userId, API_BASE_URL]);
+    }, [userId, API_BASE_URL, token]);
 
     useEffect(() => {
         fetchHistory();
-        const interval = setInterval(fetchHistory, 15000); 
+        const interval = setInterval(fetchHistory, 30000); // Polling every 30s for cloud stability
         return () => clearInterval(interval);
     }, [fetchHistory]);
 
+    // Behavioral Tracking: Keyboard
     useEffect(() => {
         const handleKeyDown = () => {
             const now = Date.now();
@@ -182,6 +123,7 @@ const Dashboard = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, []);
 
+    // Behavioral Tracking: Mouse
     useEffect(() => {
         const handleMouseMove = (e) => {
             const point = { x: e.clientX, y: e.clientY };
@@ -203,18 +145,20 @@ const Dashboard = () => {
 
     const handleLiveDetection = useCallback(async (ear, mar) => {
         const currentTime = Date.now();
+        // Send to AI every 5 seconds to prevent spamming the cloud server
         if (currentTime - lastSaveTime.current > 5000) {
             lastSaveTime.current = currentTime; 
             const result = await sendDataToAI(ear, mar, typingStats.gap, typingStats.std, mousePrecision, userId);
             if (result) {
                 setLiveAI({ status: result.status, score: result.score });
-                fetchHistory();
+                if (result.score > 0.4) fetchHistory(); // Auto-refresh history if fatigue is detected
             }
         }
     }, [userId, typingStats, mousePrecision, fetchHistory]);
 
     return (
         <div className={`p-8 space-y-8 min-h-screen transition-all duration-700 ${liveAI.status === "FATIGUE DETECTED" ? 'bg-red-50' : 'bg-slate-50'}`}>
+            {/* Optimized Webcam Monitor Component */}
             <WebcamMonitor onDetection={handleLiveDetection} />
 
             <header className="flex justify-between items-end">
@@ -256,7 +200,7 @@ const Dashboard = () => {
                 </div>
             </div>
 
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm">
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm min-w-0">
                 <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={chartData}>
