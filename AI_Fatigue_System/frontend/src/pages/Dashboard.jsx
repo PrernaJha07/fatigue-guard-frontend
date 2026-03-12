@@ -52,7 +52,6 @@ const WebcamMonitor = ({ onDetection }) => {
 
         return () => {
             if (cameraRef.current) cameraRef.current.stop();
-            // We don't close faceMesh here to avoid the WASM abort error on fast refresh
         };
     }, [onDetection, faceMesh]);
 
@@ -134,13 +133,17 @@ const Dashboard = () => {
     const mousePoints = useRef([]);
     const lastSaveTime = useRef(0);
 
+    // --- DYNAMIC API URL ---
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
     const userStored = localStorage.getItem('user');
     const userData = userStored ? JSON.parse(userStored) : null;
     const userId = userData ? userData.id : 1; 
 
     const fetchHistory = useCallback(async () => {
         try {
-            const res = await axios.get(`http://localhost:5000/api/reports/${userId}`);
+            // UPDATED: Replaced localhost with dynamic cloud URL
+            const res = await axios.get(`${API_BASE_URL}/api/reports/${userId}`);
             const formatted = res.data.map(item => ({
                 time: new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 fullDate: new Date(item.createdAt).toLocaleString(),
@@ -152,7 +155,7 @@ const Dashboard = () => {
         } catch (err) {
             console.error("Error fetching data:", err);
         }
-    }, [userId]);
+    }, [userId, API_BASE_URL]);
 
     useEffect(() => {
         fetchHistory();
