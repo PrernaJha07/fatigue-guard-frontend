@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShieldCheck, User, Mail, Lock } from 'lucide-react';
+import { ShieldCheck, User, Mail, Lock, AlertCircle } from 'lucide-react';
 import axios from 'axios';
 
 export default function Signup() {
   const navigate = useNavigate();
   
-  // State variables to store user input
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(''); // Improved error handling
 
   // --- DYNAMIC API URL ---
   const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
@@ -18,17 +18,20 @@ export default function Signup() {
   const handleSignup = async (e) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
+
     try {
-      // UPDATED: Using dynamic API_BASE_URL instead of localhost
       await axios.post(`${API_BASE_URL}/api/signup`, {
         username: fullName,
         email: email,
         password: password
       });
-      alert("Account created successfully!");
-      navigate('/login');
+      
+      // Using a toast or simple feedback instead of alert for better UX
+      navigate('/login', { state: { message: "Account created! Please sign in." } });
+      
     } catch (err) {
-      alert("Registration failed: " + (err.response?.data?.error || "Server Error"));
+      setError(err.response?.data?.error || "Registration failed. Please check your connection.");
     } finally {
       setLoading(false);
     }
@@ -37,6 +40,7 @@ export default function Signup() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
       <div className="bg-white p-10 rounded-3xl shadow-xl border border-slate-100 w-full max-w-md">
+        
         <div className="flex flex-col items-center mb-8">
           <div className="bg-blue-600 p-4 rounded-2xl text-white mb-4 shadow-lg shadow-blue-100">
             <ShieldCheck size={32} />
@@ -47,6 +51,12 @@ export default function Signup() {
           </p>
         </div>
 
+        {error && (
+          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 text-red-700 text-sm font-bold rounded-r-lg flex items-center gap-2">
+            <AlertCircle size={16} /> {error}
+          </div>
+        )}
+
         <form onSubmit={handleSignup} className="space-y-4">
           <div className="relative">
             <User className="absolute left-3 top-3 text-slate-400" size={20} />
@@ -54,9 +64,11 @@ export default function Signup() {
               type="text" 
               placeholder="Full Name" 
               required 
+              autoComplete="name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:opacity-50" 
+              disabled={loading}
             />
           </div>
 
@@ -66,9 +78,11 @@ export default function Signup() {
               type="email" 
               placeholder="Work Email" 
               required 
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:opacity-50" 
+              disabled={loading}
             />
           </div>
 
@@ -78,9 +92,11 @@ export default function Signup() {
               type="password" 
               placeholder="Create Password" 
               required 
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all" 
+              className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all disabled:opacity-50" 
+              disabled={loading}
             />
           </div>
           
