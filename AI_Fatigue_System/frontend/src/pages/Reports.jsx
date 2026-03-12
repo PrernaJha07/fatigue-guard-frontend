@@ -1,13 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Calendar, Download, AlertCircle, CheckCircle2, FileText, X } from 'lucide-react';
+import { Calendar, Download, AlertCircle, FileText, X } from 'lucide-react';
 import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable'; // Direct import to fix the "not a function" error
+import autoTable from 'jspdf-autotable';
+import { useAuth } from '../context/AuthContext'; // Import your Auth context
 
 const Reports = () => {
+    const { token } = useAuth(); // Access the secure token
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [selectedReport, setSelectedReport] = useState(null); // For the Details Modal
+    const [selectedReport, setSelectedReport] = useState(null);
+
+    // --- DYNAMIC API URL ---
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
     const userStored = localStorage.getItem('user');
     const userData = userStored ? JSON.parse(userStored) : null;
@@ -16,20 +21,22 @@ const Reports = () => {
     const fetchHistory = async () => {
         try {
             setLoading(true);
-            const res = await axios.get(`http://localhost:5000/api/reports/${userId}`);
+            // UPDATED: Dynamic URL and Authorization header
+            const res = await axios.get(`${API_BASE_URL}/api/reports/${userId}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
             setReports(res.data);
         } catch (err) {
-            console.error("Error fetching history:", err);
+            console.error("Reports: Error fetching history", err);
         } finally {
             setLoading(false);
         }
     };
 
     useEffect(() => {
-        fetchHistory();
-    }, [userId]);
+        if (userId) fetchHistory();
+    }, [userId, token]);
 
-    // FIXED PDF Export Function
     const exportToPDF = () => {
         if (reports.length === 0) {
             alert("No data available to export.");
@@ -42,7 +49,7 @@ const Reports = () => {
         
         doc.setFontSize(10);
         doc.setTextColor(100);
-        doc.text(`User ID: ${userId} | Generated: ${new Date().toLocaleString()}`, 14, 30);
+        doc.text(`User: ${userData?.name || userId} | Generated: ${new Date().toLocaleString()}`, 14, 30);
 
         const tableColumn = ["Date", "Fatigue Level", "Score", "Recommendation"];
         const tableRows = reports.map(report => [
@@ -52,7 +59,6 @@ const Reports = () => {
             report.recommendation || "Monitoring active"
         ]);
 
-        // Using the direct autoTable function to avoid TypeError
         autoTable(doc, {
             startY: 40,
             head: [tableColumn],
@@ -61,8 +67,16 @@ const Reports = () => {
             headStyles: { fillColor: [59, 130, 246] }
         });
 
-        doc.save(`Fatigue_Report_User_${userId}.pdf`);
+        doc.save(`Fatigue_Report_${new Date().toLocaleDateString()}.pdf`);
     };
+
+    if (loading) {
+        return (
+            <div className="p-8 flex items-center justify-center min-h-[50vh]">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+        );
+    }
 
     return (
         <div className="p-8 max-w-6xl animate-in fade-in duration-700">
@@ -90,7 +104,7 @@ const Reports = () => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {reports.map((report) => (
+                        {reports.length > 0 ? reports.map((report) => (
                             <tr key={report._id} className="hover:bg-slate-50/50 transition-colors">
                                 <td className="px-6 py-5 font-semibold text-slate-700 flex items-center gap-2">
                                     <Calendar size={16} className="text-slate-400" /> 
@@ -118,7 +132,11 @@ const Reports = () => {
                                     </button>
                                 </td>
                             </tr>
-                        ))}
+                        )) : (
+                            <tr>
+                                <td colSpan="4" className="px-6 py-10 text-center text-slate-400">No reports found in the history.</td>
+                            </tr>
+                        )}
                     </tbody>
                 </table>
             </div>
