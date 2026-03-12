@@ -2,21 +2,21 @@
 
 /**
  * Sends real-time sensor data to the Node.js backend for fatigue prediction.
- * @param {number} earValue - Eye Aspect Ratio
- * @param {number} marValue - Mouth Aspect Ratio
- * @param {number} typingGap - Average time between keystrokes
- * @param {number} typingStd - Variation in typing speed
- * @param {number} mousePrecision - Smoothness of mouse movement
  */
 export const sendDataToAI = async (earValue, marValue, typingGap = 400, typingStd = 50, mousePrecision = 100) => {
     
-    // --- FIX: Extracting ID from the 'user' object instead of 'userId' ---
+    // --- 1. DYNAMIC API URL ---
+    // If VITE_API_URL is set on Render/Vercel, it uses that. 
+    // Otherwise, it falls back to localhost for your laptop testing.
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
     const userStored = localStorage.getItem('user');
     const userData = userStored ? JSON.parse(userStored) : null;
-    const userId = userData ? userData.id : 1; // Fallback to 1 for testing
+    const userId = userData ? userData.id : 1; 
 
     try {
-        const response = await fetch('http://localhost:5000/api/predict-fatigue', {
+        // CHANGED: Using ${API_BASE_URL} instead of hardcoded localhost
+        const response = await fetch(`${API_BASE_URL}/api/predict-fatigue`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -25,7 +25,7 @@ export const sendDataToAI = async (earValue, marValue, typingGap = 400, typingSt
                 userId: userId,
                 typing_gap: typingGap,
                 typing_std: typingStd,
-                mouse_precision: mousePrecision // Added to pass real mouse data
+                mouse_precision: mousePrecision 
             })
         });
 

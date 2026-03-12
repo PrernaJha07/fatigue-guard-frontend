@@ -3,12 +3,13 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+     "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "Prerna Jha",
   "license": "ISC",
-  "description": "",
+  "description": "AI Fatigue Guard Backend Service",
   "dependencies": {
     "axios": "^1.13.2",
     "bcrypt": "^6.0.0",

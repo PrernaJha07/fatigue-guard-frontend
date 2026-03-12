@@ -10,34 +10,42 @@ require('dotenv').config();
 
 const app = express();
 app.use(express.json());
-app.use(cors());
 
-// --- 1. DATABASES ---
+// --- 1. UPDATED CORS FOR CLOUD ---
+// This allows your Vercel/Render frontend to talk to this backend
+app.use(cors({
+    origin: '*', // For testing, we allow all. Later, you can put your specific Vercel URL here.
+    credentials: true
+}));
 
-// MySQL Connection (For User Accounts)
+// --- 2. DATABASES ---
+
+// MySQL Connection (Cloud Aiven)
 const db = mysql.createConnection({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASS,
-    database: process.env.DB_NAME
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT || 13102 // Added Port for Aiven
 });
 
 db.connect((err) => {
     if (err) return console.error('❌ MySQL Connection Failed:', err.message);
-    console.log('✅ Connected to MySQL Database');
+    console.log('✅ Connected to MySQL Database (Aiven)');
 });
 
-// MongoDB Connection (For AI Reports)
-mongoose.connect('mongodb://127.0.0.1:27017/fatigue_db')
-    .then(() => console.log('🍃 Connected to MongoDB (Ready for AI Reports)'))
+// MongoDB Connection (Cloud Atlas)
+// CHANGED: Removed 127.0.0.1 and used the .env variable
+const mongoURI = process.env.MONGODB_URI; 
+mongoose.connect(mongoURI)
+    .then(() => console.log('🍃 Connected to MongoDB (Atlas)'))
     .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
-// --- 2. MONGODB SCHEMA (UPDATED TO STORE RAW DATA) ---
+// --- 3. MONGODB SCHEMA ---
 const ReportSchema = new mongoose.Schema({
     userId: { type: Number, required: true },
     fatigueLevel: String,   
     fatigueScore: Number,   
-    // Added these fields to store your real-time sensor data automatically
     mousePrecision: Number,
     typingGap: Number,
     recommendation: String, 
@@ -46,11 +54,10 @@ const ReportSchema = new mongoose.Schema({
 
 const AIReport = mongoose.model('AIReport', ReportSchema);
 
-// --- 3. SERVICES ---
+// --- 4. SERVICES ---
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-// --- 4. AUTH ROUTES ---
-
+// --- 5. AUTH ROUTES --- (Signup/Login code remains the same as yours)
 app.post('/api/signup', async (req, res) => {
     const { username, email, password } = req.body;
     try {
@@ -59,13 +66,11 @@ app.post('/api/signup', async (req, res) => {
         db.query(query, [username, email, hashedPassword], (err) => {
             if (err) {
                 if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: "Email already exists" });
-                return res.status(500).json({ error: "Database error occurred" });
+                return res.status(500).json({ error: "Database error" });
             }
             res.status(201).json({ message: "User created successfully" });
         });
-    } catch (err) {
-        res.status(500).json({ error: "Internal server error" });
-    }
+    } catch (err) { res.status(500).json({ error: "Internal error" }); }
 });
 
 app.post('/api/login', (req, res) => {
@@ -80,26 +85,24 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// --- 5. REPORT ROUTES ---
-
+// --- 6. REPORT ROUTES ---
 app.get('/api/reports/:userId', async (req, res) => {
     try {
         const reports = await AIReport.find({ userId: req.params.userId }).sort({ createdAt: -1 });
         res.json(reports);
-    } catch (err) {
-        res.status(500).json({ error: "Failed to fetch AI reports" });
-    }
+    } catch (err) { res.status(500).json({ error: "Failed to fetch reports" }); }
 });
 
-// --- 6. AI INTEGRATION PROXY (UPDATED FOR AUTOMATIC LOGGING) ---
+// --- 7. AI INTEGRATION PROXY (UPDATED FOR CLOUD) ---
 
 app.post('/api/predict-fatigue', async (req, res) => {
     try {
-        // Updated to receive mouse_precision from frontend
         const { ear, mar, userId, typing_gap, typing_std, mouse_precision } = req.body;
 
-        // 1. Forward data to Python AI Bridge
-        const aiResponse = await axios.post('http://127.0.0.1:5001/predict', { 
+        // CHANGED: Using process.env.PYTHON_ENGINE_URL instead of 127.0.0.1
+        const pythonUrl = process.env.PYTHON_ENGINE_URL || 'http://127.0.0.1:5001';
+        
+        const aiResponse = await axios.post(`${pythonUrl}/predict`, { 
             ear: ear, 
             mar: mar, 
             typing_gap: typing_gap || 400, 
@@ -108,33 +111,29 @@ app.post('/api/predict-fatigue', async (req, res) => {
 
         const result = aiResponse.data;
 
-        // 2. Logic to determine severity and save to MongoDB
         if (userId) {
             let level = "Low";
-            let recommendation = "You are alert and focused. Keep it up!";
+            let recommendation = "You are alert and focused.";
 
             if (result.score >= 0.75) {
                 level = "High";
-                recommendation = "CRITICAL: Please take a 15-minute break immediately.";
+                recommendation = "CRITICAL: Please take a 15-minute break.";
             } else if (result.score >= 0.40) {
                 level = "Medium";
-                recommendation = "Warning: Signs of fatigue detected. Consider a short rest.";
+                recommendation = "Warning: Signs of fatigue detected.";
             }
 
-            // Persistence Logic: Saving the real detected values into MongoDB
             const report = new AIReport({
                 userId: userId,
                 fatigueLevel: level,
                 fatigueScore: (result.score * 100).toFixed(0),
-                mousePrecision: mouse_precision || 100, // AUTO-LOGGING MOUSE
-                typingGap: typing_gap || 400,           // AUTO-LOGGING TYPING
+                mousePrecision: mouse_precision || 100,
+                typingGap: typing_gap || 400,
                 recommendation: recommendation
             });
             
             await report.save();
-            console.log(`✅ [MongoDB] Auto-Logged for User ${userId}: Mouse ${mouse_precision}% | Typing ${typing_gap}ms`);
         }
-
         res.json(result);
 
     } catch (err) {
