@@ -14,7 +14,7 @@ app.use(express.json());
 // --- 1. DYNAMIC CORS ---
 app.use(cors({
     origin: [
-        'https://fatigue-guard-ui.onrender.com', // Your Live URL
+        'https://fatigue-guard-frontend.onrender.com', // Your Live URL
         'http://localhost:5173',                 // Local React (Vite)
         'http://localhost:3000'                  // Local React (CRA)
     ],
