@@ -16,7 +16,7 @@ app.use(cors({
     origin: [
         'https://fatigue-guard-frontend.onrender.com', // Your Live URL
         'http://localhost:5173',                 // Local React (Vite)
-        'http://localhost:3000'                  // Local React (CRA)
+        //'http://localhost:3000'                  // Local React (CRA)
     ],
     credentials: true
 }));
